@@ -1,0 +1,17 @@
+{
+    "recommendations": [
+        "ms-vscode.cpptools",
+        "ms-vscode.cpptools-extension-pack",
+        "marus25.cortex-debug",
+        "ms-vscode.makefile-tools",
+        "ms-vscode.cmake-tools",
+        "twxs.cmake",
+        "DavidAnson.vscode-markdownlint",
+        "yzhang.markdown-all-in-one",
+        "streetsidesoftware.code-spell-checker",
+        "gruntfuggly.todo-tree",
+        "GitHub.Copilot",
+        "ms-vscode.hexdump"
+    ],
+    "unwantedRecommendations": []
+}

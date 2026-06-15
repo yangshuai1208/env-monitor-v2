@@ -1,0 +1,71 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Build: ARM 编译 (PowerShell)",
+            "type": "shell",
+            "command": "powershell.exe",
+            "args": [
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                "${workspaceFolder}/build.ps1"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "new",
+                "echo": true
+            },
+            "problemMatcher": {
+                "pattern": {
+                    "regexp": "^(.*):(\\d+):\\s+(error|warning):\\s+(.*)$",
+                    "file": 1,
+                    "location": 2,
+                    "severity": 3,
+                    "message": 4
+                }
+            }
+        },
+        {
+            "label": "Build: 使用 Keil MDK (如果已安装)",
+            "type": "shell",
+            "command": "powershell.exe",
+            "args": [
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                "$uv4Paths = @('C:\\Keil_v5\\UV4\\uv4.exe', 'C:\\Program Files\\Keil_v5\\UV4\\uv4.exe', 'D:\\Keil_v5\\UV4\\uv4.exe', 'C:\\Keil\\UV4\\uv4.exe'); $uv4 = $uv4Paths | Where-Object {Test-Path $_} | Select-Object -First 1; if ($uv4) { Write-Host \"找到 Keil µVision: $uv4\" -ForegroundColor Green; & $uv4 -b '${workspaceFolder}\\MDK-ARM\\Fire_F103_2.uvprojx' } else { Write-Host \"⚠️  未找到 Keil µVision，请使用其他编译任务\" -ForegroundColor Yellow; Write-Host \"需要安装 Keil µVision 来使用此任务\" -ForegroundColor Yellow; exit 1 }"
+            ],
+            "group": "build",
+            "presentation": {
+                "reveal": "always",
+                "panel": "new"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Clean: 清理编译文件",
+            "type": "shell",
+            "command": "powershell.exe",
+            "args": [
+                "-Command",
+                "Remove-Item -Recurse -Force ${workspaceFolder}\\build -ErrorAction SilentlyContinue; Write-Host '编译目录已清理'"
+            ],
+            "group": "build"
+        },
+        {
+            "label": "Open Build Log",
+            "type": "shell",
+            "command": "powershell.exe",
+            "args": [
+                "-Command",
+                "if (Test-Path '${workspaceFolder}\\MDK-ARM\\Fire_F103_2\\Fire_F103_2.build_log.htm') { Start-Process '${workspaceFolder}\\MDK-ARM\\Fire_F103_2\\Fire_F103_2.build_log.htm' }"
+            ],
+            "group": "build"
+        }
+    ]
+}

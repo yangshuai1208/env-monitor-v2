@@ -1,0 +1,12 @@
+fire_f103_2\port.o: ../Middlewares/Third_Party/FreeRTOS/Source/portable/RVDS/ARM_CM3/port.c
+fire_f103_2\port.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/FreeRTOS.h
+fire_f103_2\port.o: D:\ARM\ARMCC\Bin\..\include\stddef.h
+fire_f103_2\port.o: D:\ARM\ARMCC\Bin\..\include\stdint.h
+fire_f103_2\port.o: ../Core/Inc/FreeRTOSConfig.h
+fire_f103_2\port.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/projdefs.h
+fire_f103_2\port.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/portable.h
+fire_f103_2\port.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/deprecated_definitions.h
+fire_f103_2\port.o: ../Middlewares/Third_Party/FreeRTOS/Source/portable/RVDS/ARM_CM3/portmacro.h
+fire_f103_2\port.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/mpu_wrappers.h
+fire_f103_2\port.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/task.h
+fire_f103_2\port.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/list.h
