@@ -91,7 +91,7 @@ typedef enum
 #define EVT_DHT11_ERR (1U<<4)
 #define EVT_ALARM_ACTIVE (1U<<5)
 #define EVT_CONFIG_SAVED (1U<<6)
-
+#define MONITOR_TASK_TIMEOUT_MS 12000U
 
 #define EVT_WIFI_OK  (1U<<7)
 #define EVT_WIFI_ERR  (1U<<8)
@@ -124,7 +124,6 @@ volatile uint32_t g_uart_heartbeat=0;
 osThreadId watchdogTaskHandle;
 osThreadId monitorTaskHandle;
 osThreadId keyTaskHandle;
-osThreadId espTaskHandle;
 osThreadId wifiTaskHandle;
 
 EventGroupHandle_t g_system_event_group=NULL;
@@ -134,9 +133,7 @@ SemaphoreHandle_t g_oled_mutex=NULL;
 SemaphoreHandle_t g_config_mutex=NULL;
 
 static StaticTask_t wifiTaskControlBlock;
-static StackType_t wifiTaskStack[256];
-static StaticTask_t espTaskControlBlock;
-static StackType_t espTaskStack[256];
+static StackType_t wifiTaskStack[384];
 static StaticTask_t keyTaskControlBlock;
 static StackType_t keyTaskStack[256];
 static StaticTask_t monitorTaskControlBlock;
@@ -162,7 +159,6 @@ void StartWatchdogTask(void const* argument);
 static void AppConfig_GetSnapshot(AppConfig*config);
 void StartMonitorTask(void const*argument);
 void StartKeyTask(void const*argument);
-void StartEspTask(void const*argument);
 void  StartWiFiTask(void const*argument);
 
 
@@ -387,14 +383,7 @@ void MX_FREERTOS_Init(void) {
 		Error_Handler();
 		
 	}
-	osThreadStaticDef(espTask,StartEspTask,osPriorityLow,0,384,espTaskStack,&espTaskControlBlock);
-	espTaskHandle=osThreadCreate(osThread(espTask),NULL);
-	if(espTaskHandle==NULL)
-	{
-		Error_Handler();
-		
-	}
-		osThreadStaticDef(wifiTask,StartWiFiTask,osPriorityLow,0,384,wifiTaskStack,&wifiTaskControlBlock);
+	osThreadStaticDef(wifiTask,StartWiFiTask,osPriorityLow,0,384,wifiTaskStack,&wifiTaskControlBlock);
 	wifiTaskHandle=osThreadCreate(osThread(wifiTask),NULL);
 	if(wifiTaskHandle==NULL)
 	{
@@ -812,64 +801,7 @@ void StartKeyTask(void const * argument)
         osDelay(50);
     }
 }
-void StartEspTask(void const* argument)
-{
-		uint8_t ret;
-		(void)argument;
-		
-		osDelay(5000);
 
-		Serial_SendText("ESP8266 TASK START\r\n");
-
-		ret=ESP8266_BasicInit();
-		
-		if(ret==0)
-		{
-			Serial_SendText("ESP8266 AT OK\r\n");
-			if(g_system_event_group!=NULL)
-			{
-				xEventGroupClearBits(g_system_event_group,EVT_WIFI_ERR);
-			}
-		}
-		else 
-		{
-			Serial_SendText("ESP8266 AT ERROR\r\n");
-			if(g_system_event_group!=NULL)
-			{
-				xEventGroupSetBits(g_system_event_group,EVT_WIFI_ERR);
-				xEventGroupClearBits(g_system_event_group,EVT_WIFI_OK);
-			}
-			for(;;)
-			{
-				osDelay(5000);
-			}
-		}
-		ret=ESP8266_ConnectWiFi(WIFI_SSID,WIFI_PASSWORD);
-		if(ret==0)
-		{
-			Serial_SendText("ESP8266 WIFI CONNECT OK\r\n");
-			if(g_system_event_group!=NULL)
-			{
-				xEventGroupSetBits(g_system_event_group,EVT_WIFI_OK);
-				xEventGroupClearBits(g_system_event_group,EVT_WIFI_ERR);
-			}
-		}
-		else
-		{
-			Serial_SendText("ESP8266 CONNECT FAIL\r\n");
-			
-			if(g_system_event_group!=NULL)
-			{
-				xEventGroupSetBits(g_system_event_group,EVT_WIFI_ERR);
-				xEventGroupClearBits(g_system_event_group,EVT_WIFI_OK);
-			}
-		}
-		for(;;)
-		{
-			osDelay(10000);
-		}
-	}		
-			
 
 void vApplicationMallocFailedHook(void)
 {
@@ -918,7 +850,7 @@ void StartMonitorTask(void const *argument)
                         required_bits,
                         pdTRUE,
                         pdTRUE,
-                        pdMS_TO_TICKS(6000)
+                       pdMS_TO_TICKS(MONITOR_TASK_TIMEOUT_MS)
                     );
 
         if ((wait_bits & required_bits) == required_bits)
@@ -956,67 +888,125 @@ void StartMonitorTask(void const *argument)
         osDelay(1000);
     }
 }
-void  StartWiFiTask(void const*argument)
+void StartWiFiTask(void const *argument)
 {
-	char buf[64];
-	uint8_t ret;
+    char buf[64];
+    uint8_t ret;
 
-	(void)argument;
-	osDelay(5000);
+    (void)argument;
+    osDelay(5000);
 
-	Serial_SendText("ESP8266 TASK START\r\n");
-	
-	ret=ESP8266_BasicInit();
-	if(ret!=0)
-	{
-	Serial_SendText("ESP8266 AT ERROR\r\n");
-		for(;;)
-		{
-			osDelay(10000);
-		}
-	}
-	Serial_SendText("ESP8266 AT OK\r\n");
-	
-	ret=ESP8266_ConnectWiFi(WIFI_SSID,WIFI_PASSWORD);
-	if(ret!=0)
-	{
-		Serial_SendText("ESP8266 WIFI CONNECT FAIL\r\n");
-		for(;;)
-		{
-			osDelay(10000);
-		}
-	}
-	Serial_SendText("ESP8266 WIFI CONNECT OK\r\n");
-	if(ESP8266_TCPConnect("192.168.1.100",12345)!=0)
-	{
-		Serial_SendText("TCP CONNECT FAIL\r\n");
-		for(;;) osDelay(10000);
-	}
-	Serial_SendText("TCP CONNECT OK\r\n");
+    Serial_SendText("ESP8266 TASK START\r\n");
 
-	for(;;)
-	{
-		SensorData snapshot;
-		taskENTER_CRITICAL();
-		snapshot=g_sensor_data;
-		taskEXIT_CRITICAL();
-		
-		
-		
-		if(snapshot.valid)
-		{
-			int len = snprintf(buf, sizeof(buf),
-                   "TEMP=%d.%d,HUMI=%d.%d\r\n",
-                   snapshot.temp_int, snapshot.temp_dec,
-                   snapshot.humi_int, snapshot.humi_dec);
-				if (ESP8266_TCPSend((uint8_t *)buf, (uint16_t)len) == 0)
-					Serial_SendText("TCP SEND OK\r\n");
-				else
-					Serial_SendText("TCP SEND FAIL\r\n");
-		}
-		osDelay(5000);
-	}	
-}	
+    /* 1. ESP8266 基础初始化 */
+    ret = ESP8266_BasicInit();
+
+    if (ret != 0U)
+    {
+        Serial_SendText("ESP8266 AT ERROR\r\n");
+
+        if (g_system_event_group != NULL)
+        {
+            xEventGroupClearBits(g_system_event_group, EVT_WIFI_OK);
+            xEventGroupSetBits(g_system_event_group, EVT_WIFI_ERR);
+        }
+
+        for (;;)
+        {
+            osDelay(10000);
+        }
+    }
+
+    Serial_SendText("ESP8266 AT OK\r\n");
+
+    /* 2. 连接 WiFi */
+    ret = ESP8266_ConnectWiFi(WIFI_SSID, WIFI_PASSWORD);
+
+    if (ret != 0U)
+    {
+        Serial_SendText("ESP8266 WIFI CONNECT FAIL\r\n");
+
+        if (g_system_event_group != NULL)
+        {
+            xEventGroupClearBits(g_system_event_group, EVT_WIFI_OK);
+            xEventGroupSetBits(g_system_event_group, EVT_WIFI_ERR);
+        }
+
+        for (;;)
+        {
+            osDelay(10000);
+        }
+    }
+
+    Serial_SendText("ESP8266 WIFI CONNECT OK\r\n");
+
+    if (g_system_event_group != NULL)
+    {
+        xEventGroupClearBits(g_system_event_group, EVT_WIFI_ERR);
+        xEventGroupSetBits(g_system_event_group, EVT_WIFI_OK);
+    }
+
+    /* 3. 连接 TCP 服务器 */
+    if (ESP8266_TCPConnect("192.168.1.100", 12345) != 0U)
+    {
+        Serial_SendText("TCP CONNECT FAIL\r\n");
+
+        /*
+         * TCP 失败不代表 WiFi 已断开，
+         * 因此这里不设置 EVT_WIFI_ERR。
+         */
+        for (;;)
+        {
+            osDelay(10000);
+        }
+    }
+
+    Serial_SendText("TCP CONNECT OK\r\n");
+
+    /* 4. 周期上传传感器数据 */
+    for (;;)
+    {
+        SensorData snapshot;
+
+        taskENTER_CRITICAL();
+        snapshot = g_sensor_data;
+        taskEXIT_CRITICAL();
+
+        if (snapshot.valid != 0U)
+        {
+            int len = snprintf(
+                buf,
+                sizeof(buf),
+                "TEMP=%d.%d,HUMI=%d.%d\r\n",
+                snapshot.temp_int,
+                snapshot.temp_dec,
+                snapshot.humi_int,
+                snapshot.humi_dec
+            );
+
+            if ((len > 0) && (len < (int)sizeof(buf)))
+            {
+                if (ESP8266_TCPSend(
+                        (uint8_t *)buf,
+                        (uint16_t)len
+                    ) == 0U)
+                {
+                    Serial_SendText("TCP SEND OK\r\n");
+                }
+                else
+                {
+                    Serial_SendText("TCP SEND FAIL\r\n");
+                }
+            }
+            else
+            {
+                Serial_SendText("TCP FORMAT ERROR\r\n");
+            }
+        }
+
+        osDelay(5000);
+    }
+}
 	
 
 /* USER CODE END Application */
