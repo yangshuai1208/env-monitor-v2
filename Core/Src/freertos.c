@@ -279,22 +279,7 @@ static const char *AlarmStateToString(AlarmState state)
 						
 						}	
 }
-static uint8_t Key_IsPressed(GPIO_TypeDef*GPIOx,uint16_t GPIO_Pin)
-{
-	if(HAL_GPIO_ReadPin(GPIOx,GPIO_Pin)==GPIO_PIN_RESET)
-	{
-		osDelay(20);
-	if(HAL_GPIO_ReadPin(GPIOx,GPIO_Pin)==GPIO_PIN_RESET)
-	{
-		while(HAL_GPIO_ReadPin(GPIOx,GPIO_Pin)==GPIO_PIN_RESET)
-		{
-			osDelay(10);
-		}
-		return 1;
-	}
-}
-	return 0;
-}	
+
 /* USER CODE END GET_IDLE_TASK_MEMORY */
 
 /**
@@ -683,6 +668,65 @@ void StartSensorTask(void const * argument)
 
 /* Private application code --------------------------------------------------*/
 /* USER CODE BEGIN Application */
+
+#define KEY_DEBOUNCE_MS 20U
+
+typedef struct
+{
+    GPIO_TypeDef *port;
+    uint16_t pin;
+
+    GPIO_PinState raw_state;       
+    GPIO_PinState stable_state;    
+    TickType_t change_tick;       
+} KeyDebounce;
+
+static void KeyDebounce_Init(KeyDebounce *key,
+                             GPIO_TypeDef *port,
+                             uint16_t pin)
+{
+    GPIO_PinState current_state;
+
+    current_state = HAL_GPIO_ReadPin(port, pin);
+
+    key->port = port;
+    key->pin = pin;
+    key->raw_state = current_state;
+    key->stable_state = current_state;
+    key->change_tick = xTaskGetTickCount();
+}
+
+static uint8_t KeyDebounce_Poll(KeyDebounce *key)
+{
+    GPIO_PinState current_state;
+    TickType_t current_tick;
+
+    current_state = HAL_GPIO_ReadPin(key->port, key->pin);
+    current_tick = xTaskGetTickCount();
+
+   
+    if (current_state != key->raw_state)
+    {
+        key->raw_state = current_state;
+        key->change_tick = current_tick;
+    }
+
+    
+    if ((current_state != key->stable_state) &&
+        ((current_tick - key->change_tick) >=
+         pdMS_TO_TICKS(KEY_DEBOUNCE_MS)))
+    {
+        key->stable_state = current_state;
+
+      
+        if (current_state == GPIO_PIN_RESET)
+        {
+            return 1U;
+        }
+    }
+
+    return 0U;
+}
 void StartWatchdogTask(void const*argument)
 {
 	uint32_t last_sensor_total=0;
@@ -715,10 +759,24 @@ void StartWatchdogTask(void const*argument)
 void StartKeyTask(void const * argument)
 {
     (void)argument;
+KeyDebounce mode_key;
+KeyDebounce up_key;
+KeyDebounce down_key;
 
+KeyDebounce_Init(&mode_key,
+                 KEY_MODE_GPIO_Port,
+                 KEY_MODE_Pin);
+
+KeyDebounce_Init(&up_key,
+                 KEY_UP_GPIO_Port,
+                 KEY_UP_Pin);
+
+KeyDebounce_Init(&down_key,
+                 KEY_DOWN_GPIO_Port,
+                 KEY_DOWN_Pin);
     for (;;)
     {
-        if (Key_IsPressed(KEY_MODE_GPIO_Port, KEY_MODE_Pin))
+        if (KeyDebounce_Poll(&mode_key))
         {
             if (g_setting_item == SET_TEMP_HIGH)
             {
@@ -732,7 +790,7 @@ void StartKeyTask(void const * argument)
             Serial_SendText("KEY MODE\r\n");
         }
 
-        if (Key_IsPressed(KEY_UP_GPIO_Port,KEY_UP_Pin))
+        if (KeyDebounce_Poll(&up_key))
         {
 					if(xSemaphoreTake(g_config_mutex,pdMS_TO_TICKS(500))==pdPASS)
 					{	
@@ -750,7 +808,7 @@ void StartKeyTask(void const * argument)
 						 Serial_SendText("KEY UP\r\n");
         }
 
-        if (Key_IsPressed(KEY_DOWN_GPIO_Port, KEY_DOWN_Pin))
+        if (KeyDebounce_Poll(&down_key))
         {
 					if(xSemaphoreTake(g_config_mutex,pdMS_TO_TICKS(500))==pdPASS)
 					{
