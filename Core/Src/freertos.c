@@ -38,42 +38,13 @@
 #include "bsp_flash_param.h"
 #include "event_groups.h"
 #include "bsp_esp8266.h"
+#include "sensor_data.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-	typedef enum
-	{		
-		ALARM_NONE=0,
-		ALARM_TEMP_HIGH,
-		ALARM_HUMI_LOW,
-		ALARM_BOTH
-	}AlarmState;
-	
-	typedef struct
-	{
-			uint8_t temp_int;
-			uint8_t temp_dec;
-			uint8_t humi_int;
-			uint8_t humi_dec;
-			uint8_t ready;
-			uint8_t valid;
-			uint32_t update_count;						
-			uint32_t error_count;	
-			AlarmState alarm_state;
-	} SensorData;
 
-		typedef struct
-	{
-			uint8_t temp_int;
-			uint8_t temp_dec;
-			uint8_t humi_int;
-			uint8_t humi_dec;
-			uint8_t valid;
-			uint32_t update_count;							
-			uint32_t error_count;
-			AlarmState alarm_state;
-	} SensorMessage;										
+								
 typedef enum
 {
 	SET_TEMP_HIGH=0,
@@ -151,12 +122,9 @@ osThreadId sensorTaskHandle;
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
 static void Serial_SendText(const char *text);
-static AlarmState CheckAlarmState(uint8_t temp_int,
-																	uint8_t humi_int,
-																	int16_t temp_alarm_high,
-																	int16_t humi_alarm_low);
+
 void StartWatchdogTask(void const* argument);
-static void AppConfig_GetSnapshot(AppConfig*config);
+static BaseType_t AppConfig_GetSnapshot(AppConfig *config);
 void StartMonitorTask(void const*argument);
 void StartKeyTask(void const*argument);
 void  StartWiFiTask(void const*argument);
@@ -203,81 +171,23 @@ static void Serial_SendText(const char *text)
 				HAL_UART_Transmit(&huart1, (uint8_t *)text, (uint16_t)strlen(text), 100);
 	}
 }
-static AlarmState CheckAlarmState(uint8_t temp_int,
-																	uint8_t humi_int,
-																	int16_t temp_alarm_high,
-																	int16_t humi_alarm_low)
-{											
-	uint8_t temp_high=0;
-	uint8_t humi_low=0;
-	if(temp_int>=temp_alarm_high)
-	{
-		temp_high=1;
-	}
-	if(humi_int<=humi_alarm_low)
-	{
-		humi_low=1;
-	}
-	if(temp_high&&humi_low)
-	{
-		return ALARM_BOTH;
-	}
-	else if(temp_high)
-	{
-		return ALARM_TEMP_HIGH;
-	}
-	else if(humi_low)
-	{
-		return ALARM_HUMI_LOW;
-	}
-	else 
-	{	
-		return ALARM_NONE;
-	}
-}
-static void AppConfig_GetSnapshot(AppConfig*config)
-{
-	if(config==NULL)
-	{
-		return;
-	}
-	if(g_config_mutex!=NULL)
-	{
-		if(xSemaphoreTake(g_config_mutex,pdMS_TO_TICKS(200))==pdPASS)
-		{	
-			*config=g_app_config;
-			xSemaphoreGive(g_config_mutex);
-		}
-	}
-	else
-	{
-		*config=g_app_config;
-	}
-}
 
-static const char *AlarmStateToString(AlarmState state)
+static BaseType_t AppConfig_GetSnapshot(AppConfig *config)
 {
-							switch(state)
-						{
-							case ALARM_NONE:
-							return "NORMAL";
-							
-							
-							case ALARM_TEMP_HIGH:
-							return "TEMP_HIGH";
-							
-							case ALARM_HUMI_LOW:
-							return  "HUMI_LOW";
-			
-							
-							case ALARM_BOTH:
-							return "TEMP_HIGH_HUMI_LOW";
-					
-							
-							default:
-							return "UNKNOWN";
-						
-						}	
+    if ((config == NULL) || (g_config_mutex == NULL))
+    {
+        return pdFAIL;
+    }
+
+    if (xSemaphoreTake(g_config_mutex, pdMS_TO_TICKS(200U)) != pdPASS)
+    {
+        return pdFAIL;
+    }
+
+    *config = g_app_config;
+
+    xSemaphoreGive(g_config_mutex);
+    return pdPASS;
 }
 
 /* USER CODE END GET_IDLE_TASK_MEMORY */
@@ -289,7 +199,7 @@ static const char *AlarmStateToString(AlarmState state)
   */
 void MX_FREERTOS_Init(void) {
   /* USER CODE BEGIN Init */
-	g_sensor_msg_queue=xQueueCreate(1,sizeof(SensorMessage));						//ֻ��������һ֡������״̬����������ʷ��Ϣ������ UART ������������ݡ�
+	g_sensor_msg_queue = xQueueCreate(1U, sizeof(SensorData));					
 	if(g_sensor_msg_queue==NULL)
 	{
 		Error_Handler();
@@ -405,17 +315,9 @@ void StartLEDTask(void const * argument)
   /* Infinite loop */
   for(;;)
     {
-        taskENTER_CRITICAL();													//�����ٽ���
-        sensor_snapshot.temp_int = g_sensor_data.temp_int;				//�ѹ������ݿ��������ؿ����
-        sensor_snapshot.temp_dec = g_sensor_data.temp_dec;
-        sensor_snapshot.humi_int = g_sensor_data.humi_int;
-        sensor_snapshot.humi_dec = g_sensor_data.humi_dec;
-        sensor_snapshot.ready = g_sensor_data.ready;						//�Ƿ�׼����
-        sensor_snapshot.valid = g_sensor_data.valid;						//��ǰ�����Ƿ���Ч
-				sensor_snapshot.update_count=g_sensor_data.update_count;
-				sensor_snapshot.error_count=g_sensor_data.error_count;
-				sensor_snapshot.alarm_state=g_sensor_data.alarm_state;
-        taskEXIT_CRITICAL();																		//�˳��ٽ���
+       taskENTER_CRITICAL();
+      sensor_snapshot = g_sensor_data;
+      taskEXIT_CRITICAL();
 
 //        HAL_GPIO_TogglePin(GPIOA, LED_R_Pin);
 //        HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
@@ -508,7 +410,8 @@ void StartUartTask(void const * argument)
 {
   /* USER CODE BEGIN StartUartTask */
 	  char uart_buf[128];
-  SensorMessage msg;
+  SensorData msg;
+  SensorData_Init(&msg);
   (void)argument;
 	AppConfig config_snapshot;
 	
@@ -517,9 +420,13 @@ void StartUartTask(void const * argument)
     for(;;)
     {
 				
-			  if(xQueueReceive(g_sensor_msg_queue,&msg,portMAX_DELAY)==pdPASS)					//��g_sensor_msg_queueȡһ����Ϣ���Ž�msg�������������ʱû����Ϣ��һֱ��
+			  if(xQueueReceive(g_sensor_msg_queue,&msg,portMAX_DELAY)==pdPASS)				
 				{		
-						AppConfig_GetSnapshot(&config_snapshot);
+						if (AppConfig_GetSnapshot(&config_snapshot) != pdPASS)
+          {
+             Serial_SendText("CONFIG SNAPSHOT ERROR\r\n");
+              continue;
+          }
 						HAL_GPIO_TogglePin(GPIOA, LED_R_Pin);
 //						HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
 				
@@ -534,7 +441,7 @@ void StartUartTask(void const * argument)
               msg.humi_dec,
 							msg.update_count,
 							msg.error_count,
-						  AlarmStateToString(msg.alarm_state),		
+						 SensorData_AlarmToString(msg.alarm_state),	
 							config_snapshot.temp_alarm_high,
 							config_snapshot.humi_alarm_low);
 				}					
@@ -569,10 +476,12 @@ void StartUartTask(void const * argument)
 void StartSensorTask(void const * argument)
 {
   /* USER CODE BEGIN StartSensorTask */
-	  DHT11_DATA_TYPEDEF dht11_data;
-  SensorMessage msg;
-	AppConfig config_snapshot;
-	uint8_t dht11_ok = 0;
+DHT11_DATA_TYPEDEF dht11_data;
+SensorData msg;
+AppConfig config_snapshot;
+uint8_t dht11_ok = 0U;
+
+SensorData_Init(&msg);
 	
   (void)argument;
   osDelay(1000);															//�ȶ�
@@ -580,57 +489,52 @@ void StartSensorTask(void const * argument)
   /* Infinite loop */
   for(;;)
   {
-				AppConfig_GetSnapshot(&config_snapshot);
-        if (DHT11_ReadData(&dht11_data) == HAL_OK)				//��ȡ�ɹ�������HAL_OK
+				if (AppConfig_GetSnapshot(&config_snapshot) != pdPASS)
         {
-						dht11_ok = 1;
-            taskENTER_CRITICAL();
-            g_sensor_data.temp_int = dht11_data.temp_int;
-            g_sensor_data.temp_dec = dht11_data.temp_deci;
-            g_sensor_data.humi_int = dht11_data.humi_int;
-            g_sensor_data.humi_dec = dht11_data.humi_deci;
-            g_sensor_data.ready = 1;
-            g_sensor_data.valid = 1;
-						g_sensor_data.update_count++;
-						g_sensor_data.alarm_state=CheckAlarmState(g_sensor_data.temp_int,
-																											g_sensor_data.humi_int,
-																											config_snapshot.temp_alarm_high,
-																											config_snapshot.humi_alarm_low);
-						msg.temp_int=g_sensor_data.temp_int;
-						msg.temp_dec=g_sensor_data.temp_dec;
-						msg.humi_int=g_sensor_data.humi_int;
-						msg.humi_dec=g_sensor_data.humi_dec;
-						msg.valid=1;
-						msg.update_count=g_sensor_data.update_count;
-						msg.error_count=g_sensor_data.error_count;
-						msg.alarm_state=g_sensor_data.alarm_state;
-					
-						taskEXIT_CRITICAL();
-				
+            Serial_SendText("CONFIG SNAPSHOT ERROR\r\n");
+            osDelay(100U);
+             continue;
         }
-        else
-        {
-						dht11_ok = 0;
-            taskENTER_CRITICAL();
-            g_sensor_data.ready = 1;
-            g_sensor_data.valid = 0;
-						g_sensor_data.error_count++;
-            g_sensor_data.alarm_state=ALARM_NONE;
-					
-					
-						msg.temp_int=g_sensor_data.temp_int;
-						msg.temp_dec=g_sensor_data.temp_dec;
-						msg.humi_int=g_sensor_data.humi_int;
-						msg.humi_dec=g_sensor_data.humi_dec;
-						msg.valid=0;
-						msg.update_count=g_sensor_data.update_count;
-						msg.error_count=g_sensor_data.error_count;
-						msg.alarm_state=ALARM_NONE;
-					
-						taskEXIT_CRITICAL();
-							
-					
-        }
+       if (DHT11_ReadData(&dht11_data) == HAL_OK)
+      {
+      dht11_ok = 1U;
+
+      taskENTER_CRITICAL();
+
+    g_sensor_data.temp_int = dht11_data.temp_int;
+    g_sensor_data.temp_dec = dht11_data.temp_deci;
+    g_sensor_data.humi_int = dht11_data.humi_int;
+    g_sensor_data.humi_dec = dht11_data.humi_deci;
+    g_sensor_data.ready = 1U;
+    g_sensor_data.valid = 1U;
+    g_sensor_data.update_count++;
+
+    g_sensor_data.alarm_state = SensorData_CheckAlarm(
+        g_sensor_data.temp_int,
+        g_sensor_data.humi_int,
+        config_snapshot.temp_alarm_high,
+        config_snapshot.humi_alarm_low
+    );
+
+    msg = g_sensor_data;
+
+    taskEXIT_CRITICAL();
+}
+else
+{
+    dht11_ok = 0U;
+
+    taskENTER_CRITICAL();
+
+    g_sensor_data.ready = 1U;
+    g_sensor_data.valid = 0U;
+    g_sensor_data.error_count++;
+    g_sensor_data.alarm_state = ALARM_NONE;
+
+    msg = g_sensor_data;
+
+    taskEXIT_CRITICAL();
+}
 				if (g_system_event_group != NULL)
 				{
 						xEventGroupSetBits(g_system_event_group, EVT_SENSOR_RUN);
@@ -856,7 +760,7 @@ KeyDebounce_Init(&down_key,
             }
 					}
 				}
-        osDelay(50);
+        osDelay(10);
     }
 }
 
@@ -1065,7 +969,5 @@ void StartWiFiTask(void const *argument)
         osDelay(5000);
     }
 }
-	
 
 /* USER CODE END Application */
-
