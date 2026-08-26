@@ -23,6 +23,7 @@
 #include "main.h"
 #include "cmsis_os.h"
 
+
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "queue.h"													
@@ -34,6 +35,7 @@
 #include "semphr.h"
 #include <string.h>
 #include <stdio.h>
+#include <stdint.h>
 #include "bsp_dht11.h"
 #include "bsp_flash_param.h"
 #include "event_groups.h"
@@ -51,24 +53,39 @@ typedef enum
 	SET_HUMI_LOW
 }SettingItem;
 	
+
+typedef enum
+{
+    TASK_HEALTH_SENSOR = 0,
+    TASK_HEALTH_DISPLAY,
+    TASK_HEALTH_UART,
+    TASK_HEALTH_COUNT
+} TaskHealthId;
+
+typedef struct
+{
+    TickType_t last_alive_tick;
+    TickType_t deadline_ticks;
+    BaseType_t seen;
+} TaskHealth;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define EVT_SENSOR_RUN (1U<<0)
-#define EVT_DISPLAY_RUN (1U<<1)
-#define EVT_UART_RUN (1U<<2)
-#define EVT_DHT11_OK (1U<<3)
+
+#define EVT_DHT11_OK (1U<<3)        
 #define EVT_DHT11_ERR (1U<<4)
 #define EVT_ALARM_ACTIVE (1U<<5)
 #define EVT_CONFIG_SAVED (1U<<6)
-#define MONITOR_TASK_TIMEOUT_MS 12000U
+
 
 #define EVT_WIFI_OK  (1U<<7)
 #define EVT_WIFI_ERR  (1U<<8)
 
 #define WIFI_SSID  "One"
 #define WIFI_PASSWORD  "123456789"
+
+
 
 
 
@@ -90,8 +107,8 @@ extern volatile uint8_t g_oled_ready;
 //static StackType_t uartTaskStack[256];
 //static StaticTask_t sensorTaskControlBlock;
 //static StackType_t sensorTaskStack[256];
-volatile uint32_t g_display_heartbeat=0;
-volatile uint32_t g_uart_heartbeat=0;
+/* volatile uint32_t g_display_heartbeat=0;
+volatile uint32_t g_uart_heartbeat=0; */
 osThreadId watchdogTaskHandle;
 osThreadId monitorTaskHandle;
 osThreadId keyTaskHandle;
@@ -114,6 +131,15 @@ static StackType_t watchdogTaskStack[256];
 extern AppConfig g_app_config;
 volatile SettingItem g_setting_item=SET_TEMP_HIGH;
 volatile uint8_t g_config_changed=0;
+
+
+
+static TaskHealth g_task_health[TASK_HEALTH_COUNT] =
+{
+    {0U, pdMS_TO_TICKS(15000U), pdFALSE},
+    {0U, pdMS_TO_TICKS(4000U),  pdFALSE},
+    {0U, pdMS_TO_TICKS(15000U), pdFALSE}
+};
 /* USER CODE END Variables */
 osThreadId ledTaskHandle;
 osThreadId uartTaskHandle;
@@ -129,7 +155,11 @@ void StartMonitorTask(void const*argument);
 void StartKeyTask(void const*argument);
 void  StartWiFiTask(void const*argument);
 
+static void TaskHealth_Report(TaskHealthId id);
 
+static uint32_t TaskHealth_CollectExpiredMask(
+    TickType_t now_tick
+);
 /* USER CODE END FunctionPrototypes */
 
 void StartLEDTask(void const * argument);
@@ -388,13 +418,9 @@ void StartLEDTask(void const * argument)
             HAL_GPIO_TogglePin(GPIOA, LED_R_Pin);
         }
 			}
-					if(g_system_event_group!=NULL)
-					{
-						xEventGroupSetBits(g_system_event_group,EVT_DISPLAY_RUN);
-					
-					}
-				g_display_heartbeat++;
-        osDelay(1000);																	//OLEDÿһ��ˢ��һ��
+				
+		TaskHealth_Report(TASK_HEALTH_DISPLAY);
+        osDelay(1000U);										
     }
   /* USER CODE END StartLEDTask */
 }
@@ -451,13 +477,8 @@ void StartUartTask(void const * argument)
 							msg.update_count,
 							msg.error_count);
        }
-						if(g_system_event_group!=NULL)
-					{
-						xEventGroupSetBits(g_system_event_group,EVT_UART_RUN);
-					
-					}
-          Serial_SendText(uart_buf);
-					g_uart_heartbeat++;
+            Serial_SendText(uart_buf);
+        TaskHealth_Report(TASK_HEALTH_UART);
        }
      
     }
@@ -537,8 +558,7 @@ else
 }
 				if (g_system_event_group != NULL)
 				{
-						xEventGroupSetBits(g_system_event_group, EVT_SENSOR_RUN);
-
+					
 						if (dht11_ok)
 						{
 								xEventGroupSetBits(g_system_event_group, EVT_DHT11_OK);
@@ -559,8 +579,10 @@ else
 								xEventGroupClearBits(g_system_event_group, EVT_ALARM_ACTIVE);
 						}
 				}
-				xQueueOverwrite(g_sensor_msg_queue,&msg);			
-        uint16_t period=config_snapshot.sample_period_ms;
+				xQueueOverwrite(g_sensor_msg_queue,&msg);		
+                TaskHealth_Report(TASK_HEALTH_SENSOR);	
+        uint16_t period=config_snapshot.sample_period_ms;   
+
 				if(period<1000||period>10000)
 				{
 						period=2000;
@@ -631,34 +653,96 @@ static uint8_t KeyDebounce_Poll(KeyDebounce *key)
 
     return 0U;
 }
-void StartWatchdogTask(void const*argument)
+
+static void TaskHealth_Report(TaskHealthId id)
 {
-	uint32_t last_sensor_total=0;
-	uint32_t last_display_heart=0;
-	uint32_t last_uart_heartbeat=0;
-	
-	uint32_t sensor_total=0;
-	uint32_t display_now=0;
-	uint32_t uart_now=0;
-	
-	(void)argument;
-	osDelay(3000);
-	for(;;)
-	{
-		taskENTER_CRITICAL();
-		sensor_total=g_sensor_data.update_count+g_sensor_data.error_count;
-		display_now=g_display_heartbeat;
-		uart_now=g_uart_heartbeat;
-		taskEXIT_CRITICAL();
-		if((sensor_total!=last_sensor_total)&&(display_now!=last_display_heart)&&(uart_now!=last_uart_heartbeat))
-		{
-			HAL_IWDG_Refresh(&hiwdg);
-			last_sensor_total=sensor_total;
-			last_display_heart=display_now;
-			last_uart_heartbeat=uart_now;
-		}
-		osDelay(3000);
-	}
+    TickType_t now_tick;
+
+    if ((uint32_t)id >=
+        (uint32_t)TASK_HEALTH_COUNT)
+    {
+        return;
+    }
+
+    now_tick = xTaskGetTickCount();
+
+    taskENTER_CRITICAL();
+
+    g_task_health[id].last_alive_tick =
+        now_tick;
+
+    g_task_health[id].seen = pdTRUE;
+
+    taskEXIT_CRITICAL();
+}
+
+static uint32_t TaskHealth_CollectExpiredMask(
+    TickType_t now_tick)
+{
+    TaskHealth snapshot[TASK_HEALTH_COUNT];
+    uint32_t mask = 0U;
+
+    /*
+     * 临界区内只复制数据，
+     * 超时计算放在临界区外完成。
+     */
+    taskENTER_CRITICAL();
+
+    memcpy(
+        snapshot,
+        g_task_health,
+        sizeof(snapshot)
+    );
+
+    taskEXIT_CRITICAL();
+
+    for (uint32_t index = 0U;
+         index < (uint32_t)TASK_HEALTH_COUNT;
+         ++index)
+    {
+        TickType_t elapsed =
+            now_tick -
+            snapshot[index].last_alive_tick;
+
+        if ((snapshot[index].seen == pdFALSE) ||
+            (elapsed >
+             snapshot[index].deadline_ticks))
+        {
+            mask |= (1UL << index);
+        }
+    }
+
+    return mask;
+}
+void StartWatchdogTask(void const *argument)
+{
+    uint32_t expired_mask;
+
+    (void)argument;
+
+    /*
+     * 给三个被监控任务启动时间。
+     */
+    osDelay(3000U);
+
+    for (;;)
+    {
+        expired_mask =
+            TaskHealth_CollectExpiredMask(
+                xTaskGetTickCount()
+            );
+
+        if (expired_mask == 0U)
+        {
+            (void)HAL_IWDG_Refresh(&hiwdg);
+        }
+
+        /*
+         * 存在超时任务时停止喂狗，
+         * 等待硬件看门狗复位。
+         */
+        osDelay(3000U);
+    }
 }
 void StartKeyTask(void const * argument)
 {
@@ -795,59 +879,177 @@ void vAssertCalled(const char *file, int line)
 }
 void StartMonitorTask(void const *argument)
 {
-    EventBits_t wait_bits;
     EventBits_t now_bits;
+    EventBits_t previous_status_bits = 0U;
+    EventBits_t changed_bits;
 
-    const EventBits_t required_bits = EVT_SENSOR_RUN |
-                                      EVT_DISPLAY_RUN |
-                                      EVT_UART_RUN;
+    uint32_t expired_mask;
+    uint32_t previous_expired_mask =
+        UINT32_MAX;
+
+    const EventBits_t tracked_status_bits =
+        EVT_DHT11_OK |
+        EVT_DHT11_ERR |
+        EVT_WIFI_OK |
+        EVT_WIFI_ERR |
+        EVT_ALARM_ACTIVE;
 
     (void)argument;
-    osDelay(3000);
+
+    osDelay(3000U);
 
     for (;;)
     {
-        wait_bits = xEventGroupWaitBits(
-                        g_system_event_group,
-                        required_bits,
-                        pdTRUE,
-                        pdTRUE,
-                       pdMS_TO_TICKS(MONITOR_TASK_TIMEOUT_MS)
+        /*
+         * 一、检查任务存活状态
+         */
+        expired_mask =
+            TaskHealth_CollectExpiredMask(
+                xTaskGetTickCount()
+            );
+
+        /*
+         * 只在状态变化时打印，
+         * 避免每秒重复刷屏。
+         */
+        if (expired_mask !=
+            previous_expired_mask)
+        {
+            if (expired_mask == 0U)
+            {
+                Serial_SendText(
+                    "SYS TASKS OK\r\n"
+                );
+            }
+            else
+            {
+                if ((expired_mask &
+                     (1UL <<
+                      TASK_HEALTH_SENSOR)) != 0U)
+                {
+                    Serial_SendText(
+                        "SYS SENSOR TASK TIMEOUT\r\n"
                     );
+                }
 
-        if ((wait_bits & required_bits) == required_bits)
-        {
-            Serial_SendText("SYS TASK OK\r\n");
-        }
-        else
-        {
-            Serial_SendText("SYS TASK TIMEOUT\r\n");
-        }
+                if ((expired_mask &
+                     (1UL <<
+                      TASK_HEALTH_DISPLAY)) != 0U)
+                {
+                    Serial_SendText(
+                        "SYS DISPLAY TASK TIMEOUT\r\n"
+                    );
+                }
 
-        now_bits = xEventGroupGetBits(g_system_event_group);
+                if ((expired_mask &
+                     (1UL <<
+                      TASK_HEALTH_UART)) != 0U)
+                {
+                    Serial_SendText(
+                        "SYS UART TASK TIMEOUT\r\n"
+                    );
+                }
+            }
 
-        if ((now_bits & EVT_WIFI_OK) != 0)
-        {
-            Serial_SendText("SYS WIFI OK\r\n");
-        }
-
-        if ((now_bits & EVT_WIFI_ERR) != 0)
-        {
-            Serial_SendText("SYS WIFI ERROR\r\n");
-        }
-
-        if ((now_bits & EVT_ALARM_ACTIVE) != 0)
-        {
-            Serial_SendText("SYS ALARM ACTIVE\r\n");
+            previous_expired_mask =
+                expired_mask;
         }
 
-        if ((now_bits & EVT_CONFIG_SAVED) != 0)
+        /*
+         * 二、读取业务状态
+         */
+        now_bits =
+            xEventGroupGetBits(
+                g_system_event_group
+            );
+
+        /*
+         * XOR得到发生变化的位。
+         */
+        changed_bits =
+            (now_bits ^
+             previous_status_bits) &
+            tracked_status_bits;
+
+        if (((changed_bits &
+              EVT_DHT11_OK) != 0U) &&
+            ((now_bits &
+              EVT_DHT11_OK) != 0U))
         {
-            Serial_SendText("SYS CONFIG SAVED EVT\r\n");
-            xEventGroupClearBits(g_system_event_group, EVT_CONFIG_SAVED);
+            Serial_SendText(
+                "SYS DHT11 DATA OK\r\n"
+            );
         }
 
-        osDelay(1000);
+        if (((changed_bits &
+              EVT_DHT11_ERR) != 0U) &&
+            ((now_bits &
+              EVT_DHT11_ERR) != 0U))
+        {
+            Serial_SendText(
+                "SYS DHT11 DATA ERROR\r\n"
+            );
+        }
+
+        if (((changed_bits &
+              EVT_WIFI_OK) != 0U) &&
+            ((now_bits &
+              EVT_WIFI_OK) != 0U))
+        {
+            Serial_SendText(
+                "SYS WIFI OK\r\n"
+            );
+        }
+
+        if (((changed_bits &
+              EVT_WIFI_ERR) != 0U) &&
+            ((now_bits &
+              EVT_WIFI_ERR) != 0U))
+        {
+            Serial_SendText(
+                "SYS WIFI ERROR\r\n"
+            );
+        }
+
+        if ((changed_bits &
+             EVT_ALARM_ACTIVE) != 0U)
+        {
+            if ((now_bits &
+                 EVT_ALARM_ACTIVE) != 0U)
+            {
+                Serial_SendText(
+                    "SYS ALARM ACTIVE\r\n"
+                );
+            }
+            else
+            {
+                Serial_SendText(
+                    "SYS ALARM CLEARED\r\n"
+                );
+            }
+        }
+
+        /*
+         * CONFIG_SAVED是一次性事件。
+         */
+        if ((now_bits &
+             EVT_CONFIG_SAVED) != 0U)
+        {
+            Serial_SendText(
+                "SYS CONFIG SAVED\r\n"
+            );
+
+            xEventGroupClearBits(
+                g_system_event_group,
+                EVT_CONFIG_SAVED
+            );
+        }
+
+        previous_status_bits =
+            now_bits &
+            tracked_status_bits;
+
+        osDelay(1000U);
     }
 }
 void StartWiFiTask(void const *argument)
