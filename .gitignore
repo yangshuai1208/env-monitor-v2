@@ -23,3 +23,7 @@ Desktop.ini
 # 日志和临时文件
 *.log
 *.tmp
+# Windows主机测试输出
+build/
+*.exe
+*.obj
