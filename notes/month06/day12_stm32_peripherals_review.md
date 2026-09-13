@@ -83,10 +83,3 @@ DMA可以降低CPU搬运数据的开销，但不能自动解决UART粘包、半�
 
 `UART ring buffer tests passed`
 
-## 八、延期内容
-
-以下内容顺延至Day13下午：
-
-- 位运算与整数溢出错题复盘。
-- IWDG与MQTT项目追问。
-- Day11最后一道工程代码题。
