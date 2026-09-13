@@ -425,31 +425,7 @@ WiFi SSID、密码以及 TCP 服务器地址直接写在源码中。
 9. README、简历和面试表述必须与当前源码一致。
 10. 项目审计不仅要看功能，还要检查并发、内存、超时和异常恢复。
 
-## 十三、GitHub 提交建议
 
-修复完成后建议拆分提交，不要把所有修改混在一个 Commit 中：
-
-```text
-fix: align static task stack buffers with configured depth
-```
-
-```text
-refactor: merge duplicate ESP8266 networking tasks
-```
-
-```text
-fix: align monitor timeout with sensor period
-```
-
-```text
-config: enable FreeRTOS stack and malloc failure hooks
-```
-
-```text
-docs: update FreeRTOS task architecture and UART implementation
-```
-
-本次笔记提交信息：
 
 ```text
 docs: add Day1 FreeRTOS source audit notes
